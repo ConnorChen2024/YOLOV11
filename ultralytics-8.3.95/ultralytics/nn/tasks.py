@@ -1186,8 +1186,8 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 legacy = False
                 if scale in "lx":  # for L/X sizes
                     args.extend((True, 1.2))
-        elif m in {GAM}:
-            c2 = ch[f]  # i.e. GAM(ch[f])
+        elif m in {CBAM}:
+            c2 = ch[f]  # i.e. CBAM(ch[f])
             args = [c2, *args]
         elif m is AIFI:
             args = [ch[f], *args]
