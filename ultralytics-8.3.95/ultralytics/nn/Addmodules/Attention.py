@@ -1,55 +1,47 @@
 import torch
 import torch.nn as nn
  
-'''
-https://arxiv.org/abs/2112.05561
-'''
  
-class GAM(nn.Module):
-    def __init__(self, in_channels, rate=4):
+class ChannelAttention(nn.Module):
+    """Channel-attention module https://github.com/open-mmlab/mmdetection/tree/v3.0.0rc1/configs/rtmdet."""
+ 
+    def __init__(self, channels: int) -> None:
+        """Initializes the class and sets the basic configurations and instance variables required."""
         super().__init__()
-        out_channels = in_channels
-        in_channels = int(in_channels)
-        out_channels = int(out_channels)
-        inchannel_rate = int(in_channels/rate)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Conv2d(channels, channels, 1, 1, 0, bias=True)
+        self.act = nn.Sigmoid()
+ 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Applies forward pass using activation on convolutions of the input, optionally using batch normalization."""
+        return x * self.act(self.fc(self.pool(x)))
  
  
-        self.linear1 = nn.Linear(in_channels, inchannel_rate)
-        self.relu = nn.ReLU(inplace=True)
-        self.linear2 = nn.Linear(inchannel_rate, in_channels)
-        
+class SpatialAttention(nn.Module):
+    """Spatial-attention module."""
  
-        self.conv1=nn.Conv2d(in_channels, inchannel_rate,kernel_size=7,padding=3,padding_mode='replicate')
+    def __init__(self, kernel_size=7):
+        """Initialize Spatial-attention module with kernel size argument."""
+        super().__init__()
+        assert kernel_size in (3, 7), "kernel size must be 3 or 7"
+        padding = 3 if kernel_size == 7 else 1
+        self.cv1 = nn.Conv2d(2, 1, kernel_size, padding=padding, bias=False)
+        self.act = nn.Sigmoid()
  
-        self.conv2=nn.Conv2d(inchannel_rate, out_channels,kernel_size=7,padding=3,padding_mode='replicate')
+    def forward(self, x):
+        """Apply channel and spatial attention on input for feature recalibration."""
+        return x * self.act(self.cv1(torch.cat([torch.mean(x, 1, keepdim=True), torch.max(x, 1, keepdim=True)[0]], 1)))
  
-        self.norm1 = nn.BatchNorm2d(inchannel_rate)
-        self.norm2 = nn.BatchNorm2d(out_channels)
-        self.sigmoid = nn.Sigmoid()
  
-    def forward(self,x):
-        b, c, h, w = x.shape
-        # B,C,H,W ==> B,H*W,C
-        x_permute = x.permute(0, 2, 3, 1).view(b, -1, c)
-        
-        # B,H*W,C ==> B,H,W,C
-        x_att_permute = self.linear2(self.relu(self.linear1(x_permute))).view(b, h, w, c)
+class CBAM(nn.Module):
+    """Convolutional Block Attention Module."""
  
-        # B,H,W,C ==> B,C,H,W
-        x_channel_att = x_att_permute.permute(0, 3, 1, 2)
+    def __init__(self, c1, kernel_size=7):
+        """Initialize CBAM with given input channel (c1) and kernel size."""
+        super().__init__()
+        self.channel_attention = ChannelAttention(c1)
+        self.spatial_attention = SpatialAttention(kernel_size)
  
-        x = x * x_channel_att
- 
-        x_spatial_att = self.relu(self.norm1(self.conv1(x)))
-        x_spatial_att = self.sigmoid(self.norm2(self.conv2(x_spatial_att)))
-        
-        out = x * x_spatial_att
- 
-        return out
- 
-if __name__ == '__main__':
-    img = torch.rand(1,64,32,48)
-    b, c, h, w = img.shape
-    net = GAM(in_channels=c, out_channels=c)
-    output = net(img)
-    print(output.shape)
+    def forward(self, x):
+        """Applies the forward pass through C1 module."""
+        return self.spatial_attention(self.channel_attention(x))
